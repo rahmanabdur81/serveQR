@@ -55,10 +55,16 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({ restaura
     isVeg: true,
     available: true,
     prepTimeMinutes: '15',
-    addonLabel: '',
-    addonPrice: '',
     customizations: [] as CustomizationGroup[],
   });
+
+  // Customization group builder state inside Add/Edit Item modal
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupType, setNewGroupType] = useState<'single' | 'multiple'>('single');
+  const [newGroupRequired, setNewGroupRequired] = useState(true);
+  const [choiceDrafts, setChoiceDrafts] = useState<
+    Record<string, { label: string; price: string }>
+  >({});
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -81,6 +87,10 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({ restaura
   const openCreateModal = () => {
     setEditingItem(null);
     setFormErrors({});
+    setNewGroupName('');
+    setNewGroupType('single');
+    setNewGroupRequired(true);
+    setChoiceDrafts({});
     setForm({
       name: '',
       description: '',
@@ -90,8 +100,6 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({ restaura
       isVeg: true,
       available: true,
       prepTimeMinutes: '15',
-      addonLabel: '',
-      addonPrice: '',
       customizations: [],
     });
     setModalOpen(true);
@@ -100,6 +108,10 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({ restaura
   const openEditModal = (item: MenuItem) => {
     setEditingItem(item);
     setFormErrors({});
+    setNewGroupName('');
+    setNewGroupType('single');
+    setNewGroupRequired(true);
+    setChoiceDrafts({});
     setForm({
       name: item.name,
       description: item.description,
@@ -109,51 +121,93 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({ restaura
       isVeg: item.isVeg,
       available: item.available,
       prepTimeMinutes: String(item.prepTimeMinutes),
-      addonLabel: '',
-      addonPrice: '',
-      customizations: item.customizations,
+      customizations: item.customizations.map((g) => ({
+        ...g,
+        choices: [...g.choices],
+      })),
     });
     setModalOpen(true);
   };
 
-  const handleAddAddonChoice = () => {
-    const label = form.addonLabel.trim();
-    const priceDelta = Number(form.addonPrice || 0);
+  const handleAddCustomizationGroup = (preset?: {
+    name: string;
+    type: 'single' | 'multiple';
+    required: boolean;
+    choices: { label: string; priceDelta: number }[];
+  }) => {
+    const groupName = (preset ? preset.name : newGroupName).trim();
+    if (!groupName) return;
+    const baseTs = Date.now();
+    const newGroup: CustomizationGroup = {
+      id: `grp-${baseTs}-${Math.random().toString(36).slice(2, 5)}`,
+      name: groupName,
+      type: preset ? preset.type : newGroupType,
+      required: preset ? preset.required : newGroupRequired,
+      choices: preset
+        ? preset.choices.map((c, idx) => ({
+            id: `ch-${baseTs}-${idx}`,
+            label: c.label,
+            priceDelta: c.priceDelta,
+          }))
+        : [],
+    };
+    setForm((prev) => ({
+      ...prev,
+      customizations: [...prev.customizations, newGroup],
+    }));
+    if (!preset) {
+      setNewGroupName('');
+    }
+  };
+
+  const handleUpdateGroupMeta = (
+    groupId: string,
+    patch: Partial<Pick<CustomizationGroup, 'type' | 'required'>>
+  ) => {
+    setForm((prev) => ({
+      ...prev,
+      customizations: prev.customizations.map((g) =>
+        g.id === groupId ? { ...g, ...patch } : g
+      ),
+    }));
+  };
+
+  const handleRemoveCustomizationGroup = (groupId: string) => {
+    setForm((prev) => ({
+      ...prev,
+      customizations: prev.customizations.filter((g) => g.id !== groupId),
+    }));
+  };
+
+  const handleAddChoiceToGroup = (groupId: string) => {
+    const draft = choiceDrafts[groupId] ?? { label: '', price: '' };
+    const label = draft.label.trim();
+    const priceDelta = Number(draft.price || 0);
     if (!label || !Number.isFinite(priceDelta) || priceDelta < 0) return;
 
-    const existingGroup = form.customizations.find((g) => g.type === 'multiple');
     const newChoice = {
-      id: `ch-${Date.now()}`,
+      id: `ch-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
       label,
       priceDelta,
     };
+    setForm((prev) => ({
+      ...prev,
+      customizations: prev.customizations.map((g) =>
+        g.id === groupId ? { ...g, choices: [...g.choices, newChoice] } : g
+      ),
+    }));
+    setChoiceDrafts((prev) => ({ ...prev, [groupId]: { label: '', price: '' } }));
+  };
 
-    if (existingGroup) {
-      setForm((prev) => ({
-        ...prev,
-        addonLabel: '',
-        addonPrice: '',
-        customizations: prev.customizations.map((g) =>
-          g.id === existingGroup.id ? { ...g, choices: [...g.choices, newChoice] } : g
-        ),
-      }));
-    } else {
-      setForm((prev) => ({
-        ...prev,
-        addonLabel: '',
-        addonPrice: '',
-        customizations: [
-          ...prev.customizations,
-          {
-            id: `grp-addons-${Date.now()}`,
-            name: 'Add-ons',
-            type: 'multiple',
-            required: false,
-            choices: [newChoice],
-          },
-        ],
-      }));
-    }
+  const handleRemoveChoiceFromGroup = (groupId: string, choiceId: string) => {
+    setForm((prev) => ({
+      ...prev,
+      customizations: prev.customizations.map((g) =>
+        g.id === groupId
+          ? { ...g, choices: g.choices.filter((c) => c.id !== choiceId) }
+          : g
+      ),
+    }));
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -192,7 +246,7 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({ restaura
       isVeg: form.isVeg,
       available: form.available,
       prepTimeMinutes,
-      customizations: form.customizations,
+      customizations: form.customizations.filter((g) => g.choices.length > 0),
     };
 
     if (editingItem) {
@@ -597,47 +651,214 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({ restaura
                   </div>
                 </div>
 
-                {/* Quick Customization Add-ons */}
-                <div className="sm:col-span-2 pt-2 border-t border-slate-100">
-                  <p className="text-xs font-semibold text-slate-700 mb-2">
-                    Customization Options ({form.customizations.reduce((s, g) => s + g.choices.length, 0)} choices)
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={form.addonLabel}
-                      onChange={(e) => setForm({ ...form, addonLabel: e.target.value })}
-                      placeholder="Add-on name (e.g., Extra Cheese)"
-                      aria-label="Add-on name"
-                      className="flex-1 px-3 py-1.5 text-xs border border-slate-300 rounded-lg"
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      value={form.addonPrice}
-                      onChange={(e) => setForm({ ...form, addonPrice: e.target.value })}
-                      placeholder="+₹"
-                      aria-label="Add-on price"
-                      className="w-20 px-2.5 py-1.5 text-xs font-mono border border-slate-300 rounded-lg"
-                    />
+                {/* Configurable Customization Groups (Portions, Mandatory/Optional, Single/Multi-select) */}
+                <div className="sm:col-span-2 pt-3 border-t border-slate-200 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-bold text-[#172B4D]">
+                        Food Customizations, Portions &amp; Add-ons
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Configure mandatory or optional single/multi-select groups. Leave empty for
+                        direct 1-tap add.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleAddCustomizationGroup({
+                            name: 'Portion Size',
+                            type: 'single',
+                            required: true,
+                            choices: [
+                              { label: 'Regular', priceDelta: 0 },
+                              { label: 'Full', priceDelta: 100 },
+                            ],
+                          })
+                        }
+                        className="px-2 py-1 text-[11px] font-semibold text-[#172B4D] bg-slate-100 hover:bg-slate-200 rounded-md cursor-pointer"
+                      >
+                        + Portion Preset
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleAddCustomizationGroup({
+                            name: 'Add-ons',
+                            type: 'multiple',
+                            required: false,
+                            choices: [{ label: 'Extra Dip / Side', priceDelta: 30 }],
+                          })
+                        }
+                        className="px-2 py-1 text-[11px] font-semibold text-[#172B4D] bg-slate-100 hover:bg-slate-200 rounded-md cursor-pointer"
+                      >
+                        + Add-ons Preset
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Add Custom Group Bar */}
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                      <input
+                        type="text"
+                        value={newGroupName}
+                        onChange={(e) => setNewGroupName(e.target.value)}
+                        placeholder="Group name (e.g., Portion Size, Spice Level, Add-ons)"
+                        aria-label="Customization group name"
+                        className="sm:col-span-6 px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
+                      />
+                      <select
+                        value={newGroupType}
+                        onChange={(e) =>
+                          setNewGroupType(e.target.value as 'single' | 'multiple')
+                        }
+                        aria-label="Selection type"
+                        className="sm:col-span-3 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
+                      >
+                        <option value="single">Single-select</option>
+                        <option value="multiple">Multi-select</option>
+                      </select>
+                      <select
+                        value={newGroupRequired ? 'required' : 'optional'}
+                        onChange={(e) => setNewGroupRequired(e.target.value === 'required')}
+                        aria-label="Requirement type"
+                        className="sm:col-span-3 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
+                      >
+                        <option value="required">Mandatory</option>
+                        <option value="optional">Optional</option>
+                      </select>
+                    </div>
                     <button
                       type="button"
-                      onClick={handleAddAddonChoice}
-                      className="px-3 py-1.5 text-xs font-semibold text-[#087F5B] border border-[#087F5B] rounded-lg hover:bg-emerald-50 cursor-pointer whitespace-nowrap"
+                      onClick={() => handleAddCustomizationGroup()}
+                      className="px-3 py-1.5 text-xs font-semibold text-[#087F5B] bg-white border border-[#087F5B] rounded-lg hover:bg-emerald-50 cursor-pointer"
                     >
-                      + Add Option
+                      + Create Customization Group
                     </button>
                   </div>
+
+                  {/* Existing Groups & Choices */}
                   {form.customizations.length > 0 && (
-                    <div className="mt-2.5 text-xs text-slate-600 space-y-1">
-                      {form.customizations.map((g) => (
-                        <p key={g.id}>
-                          <span className="font-semibold text-[#172B4D]">{g.name}:</span>{' '}
-                          {g.choices
-                            .map((c) => `${c.label}${c.priceDelta > 0 ? ` (+${cur}${c.priceDelta})` : ''}`)
-                            .join(', ')}
-                        </p>
-                      ))}
+                    <div className="space-y-2.5">
+                      {form.customizations.map((group) => {
+                        const draft = choiceDrafts[group.id] ?? { label: '', price: '' };
+                        return (
+                          <div
+                            key={group.id}
+                            className="p-3 rounded-xl border border-slate-200 bg-white space-y-2.5"
+                          >
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold text-[#172B4D]">
+                                  {group.name}
+                                </span>
+                                <select
+                                  value={group.type}
+                                  onChange={(e) =>
+                                    handleUpdateGroupMeta(group.id, {
+                                      type: e.target.value as 'single' | 'multiple',
+                                    })
+                                  }
+                                  aria-label={`Selection mode for ${group.name}`}
+                                  className="px-2 py-0.5 text-[11px] border border-slate-200 rounded bg-slate-50"
+                                >
+                                  <option value="single">Single-select</option>
+                                  <option value="multiple">Multi-select</option>
+                                </select>
+                                <label className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={group.required}
+                                    onChange={(e) =>
+                                      handleUpdateGroupMeta(group.id, {
+                                        required: e.target.checked,
+                                      })
+                                    }
+                                    className="w-3.5 h-3.5 rounded border-slate-300 text-[#087F5B]"
+                                  />
+                                  Mandatory
+                                </label>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCustomizationGroup(group.id)}
+                                className="text-[11px] font-semibold text-red-600 hover:underline cursor-pointer"
+                              >
+                                Remove Group
+                              </button>
+                            </div>
+
+                            {group.choices.length > 0 && (
+                              <ul className="divide-y divide-slate-100 border border-slate-100 rounded-lg">
+                                {group.choices.map((ch) => (
+                                  <li
+                                    key={ch.id}
+                                    className="px-2.5 py-1.5 flex items-center justify-between text-xs"
+                                  >
+                                    <span className="text-slate-700 font-medium">{ch.label}</span>
+                                    <div className="flex items-center gap-3">
+                                      <span className="font-mono text-slate-500 tabular-nums">
+                                        {ch.priceDelta > 0
+                                          ? `+${formatCurrency(ch.priceDelta, cur)}`
+                                          : 'Included'}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleRemoveChoiceFromGroup(group.id, ch.id)
+                                        }
+                                        aria-label={`Remove ${ch.label}`}
+                                        className="text-slate-400 hover:text-red-600 cursor-pointer"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={draft.label}
+                                onChange={(e) =>
+                                  setChoiceDrafts((prev) => ({
+                                    ...prev,
+                                    [group.id]: { ...draft, label: e.target.value },
+                                  }))
+                                }
+                                placeholder={`Add choice to ${group.name}...`}
+                                aria-label={`New choice name for ${group.name}`}
+                                className="flex-1 px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg"
+                              />
+                              <input
+                                type="number"
+                                min="0"
+                                value={draft.price}
+                                onChange={(e) =>
+                                  setChoiceDrafts((prev) => ({
+                                    ...prev,
+                                    [group.id]: { ...draft, price: e.target.value },
+                                  }))
+                                }
+                                placeholder="+₹"
+                                aria-label={`New choice price for ${group.name}`}
+                                className="w-20 px-2 py-1.5 text-xs font-mono border border-slate-300 rounded-lg"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleAddChoiceToGroup(group.id)}
+                                className="px-2.5 py-1.5 text-xs font-semibold text-[#087F5B] border border-[#087F5B] rounded-lg hover:bg-emerald-50 cursor-pointer whitespace-nowrap"
+                              >
+                                + Add
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

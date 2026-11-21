@@ -304,6 +304,16 @@ export function createInitialSeedState(): ServeQRState {
         prepTimeMinutes: 18,
         customizations: [
           {
+            id: 'grp-portion-101',
+            name: 'Portion Size',
+            type: 'single',
+            required: true,
+            choices: [
+              { id: 'c-reg-101', label: 'Regular (1 Serve)', priceDelta: 0 },
+              { id: 'c-full-101', label: 'Full / Jumbo (2 Serves)', priceDelta: 120 },
+            ],
+          },
+          {
             id: 'grp-spice-101',
             name: 'Spice Level',
             type: 'single',
@@ -340,6 +350,16 @@ export function createInitialSeedState(): ServeQRState {
         available: true,
         prepTimeMinutes: 22,
         customizations: [
+          {
+            id: 'grp-portion-102',
+            name: 'Portion Size',
+            type: 'single',
+            required: true,
+            choices: [
+              { id: 'c-reg-102', label: 'Regular (1 Serve)', priceDelta: 0 },
+              { id: 'c-full-102', label: 'Full (2 Serves)', priceDelta: 160 },
+            ],
+          },
           {
             id: 'grp-spice-102',
             name: 'Spice Level',
@@ -403,6 +423,16 @@ export function createInitialSeedState(): ServeQRState {
         prepTimeMinutes: 20,
         customizations: [
           {
+            id: 'grp-portion-104',
+            name: 'Portion Size',
+            type: 'single',
+            required: true,
+            choices: [
+              { id: 'c-half-104', label: 'Half Bird', priceDelta: 0 },
+              { id: 'c-full-104', label: 'Full Bird', priceDelta: 220 },
+            ],
+          },
+          {
             id: 'grp-spice-104',
             name: 'Marinade Style',
             type: 'single',
@@ -415,7 +445,7 @@ export function createInitialSeedState(): ServeQRState {
           },
           {
             id: 'grp-addons-104',
-            name: 'Sides',
+            name: 'Add-ons',
             type: 'multiple',
             required: false,
             choices: [
@@ -514,18 +544,7 @@ export function createInitialSeedState(): ServeQRState {
         isVeg: true,
         available: true,
         prepTimeMinutes: 5,
-        customizations: [
-          {
-            id: 'grp-ice-108',
-            name: 'Ice Preference',
-            type: 'single',
-            required: false,
-            choices: [
-              { id: 'c-reg-ice', label: 'Regular Ice', priceDelta: 0 },
-              { id: 'c-less-ice', label: 'Less Ice', priceDelta: 0 },
-            ],
-          },
-        ],
+        customizations: [],
       },
       {
         id: 'MENU-109',
@@ -539,17 +558,7 @@ export function createInitialSeedState(): ServeQRState {
         isVeg: true,
         available: true,
         prepTimeMinutes: 5,
-        customizations: [
-          {
-            id: 'grp-addons-109',
-            name: 'Dessert Pairing',
-            type: 'multiple',
-            required: false,
-            choices: [
-              { id: 'c-van-scoop', label: 'Add Vanilla Ice Cream Scoop', priceDelta: 45 },
-            ],
-          },
-        ],
+        customizations: [],
       },
       {
         id: 'MENU-110',

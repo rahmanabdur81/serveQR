@@ -20,11 +20,13 @@ import {
   formatCurrency,
   getAvailableCustomerPaymentMethods,
   getCustomerTrackingStepIndex,
+  hasConfiguredCustomizations,
   isRestaurantOrderingAvailable,
   isValidIndianMobile,
   scopeMenuItemsByRestaurant,
   scopeOrdersByRestaurant,
   scopeTablesByRestaurant,
+  upsertCustomizedCartItem,
   validateCustomerCheckout,
   type ValidationErrors,
 } from '../../domain/serveqrLogic';
@@ -216,61 +218,34 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
     setGuestCart(restaurant.id, table.tableNumber, next);
   };
 
-  const handleQuickAdd = (item: MenuItem) => {
+  const openCustomizationSheet = (item: MenuItem, cartLine: CartItem | null = null) => {
+    if (!item.available && !cartLine) return;
+    setEditingCartItem(cartLine);
+    setCustomizingItem(item);
+  };
+
+  const handlePrimaryAddClick = (item: MenuItem) => {
     if (!item.available) return;
-    const defaultCustomizations: SelectedCustomization[] = [];
-    for (const g of item.customizations) {
-      if (g.type === 'single' && g.required && g.choices.length > 0) {
-        const ch = g.choices[Math.min(1, g.choices.length - 1)] ?? g.choices[0];
-        defaultCustomizations.push({
-          groupId: g.id,
-          groupName: g.name,
-          choiceId: ch.id,
-          choiceLabel: ch.label,
-          priceDelta: ch.priceDelta,
-        });
-      }
+    // Swiggy-style behavior: if the dish has configured options/portions/add-ons, open the customization bottom sheet
+    if (hasConfiguredCustomizations(item)) {
+      openCustomizationSheet(item, null);
+      return;
     }
 
-    const existing = cart.find(
-      (ci) =>
-        ci.menuItemId === item.id &&
-        ci.specialInstructions === '' &&
-        JSON.stringify(ci.selectedCustomizations) === JSON.stringify(defaultCustomizations)
-    );
-
-    if (existing) {
-      updateCart(
-        cart.map((ci) =>
-          ci.cartItemId === existing.cartItemId
-            ? { ...ci, quantity: ci.quantity + 1 }
-            : ci
-        )
-      );
-    } else {
-      updateCart([
-        ...cart,
-        {
-          cartItemId: `ci-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          menuItemId: item.id,
-          name: item.name,
-          imageUrl: item.imageUrl,
-          basePrice: item.price,
-          isVeg: item.isVeg,
-          prepTimeMinutes: item.prepTimeMinutes,
-          quantity: 1,
-          selectedCustomizations: defaultCustomizations,
-          specialInstructions: '',
-        },
-      ]);
-    }
+    // Items with no configured options add directly for minimal friction
+    const next = upsertCustomizedCartItem(cart, item, {
+      selectedCustomizations: [],
+      specialInstructions: '',
+      quantity: 1,
+    });
+    updateCart(next);
   };
 
   // Swiggy-style inline stepper handlers for menu cards
   const handleMenuCardIncrement = (item: MenuItem) => {
     const matching = cart.filter((ci) => ci.menuItemId === item.id);
     if (matching.length === 0) {
-      handleQuickAdd(item);
+      handlePrimaryAddClick(item);
       return;
     }
     const lastEntry = matching[matching.length - 1];
@@ -299,36 +274,13 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
     quantity: number;
   }) => {
     if (!customizingItem) return;
-    if (editingCartItem) {
-      updateCart(
-        cart.map((ci) =>
-          ci.cartItemId === editingCartItem.cartItemId
-            ? {
-                ...ci,
-                selectedCustomizations: payload.selectedCustomizations,
-                specialInstructions: payload.specialInstructions,
-                quantity: payload.quantity,
-              }
-            : ci
-        )
-      );
-    } else {
-      updateCart([
-        ...cart,
-        {
-          cartItemId: `ci-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          menuItemId: customizingItem.id,
-          name: customizingItem.name,
-          imageUrl: customizingItem.imageUrl,
-          basePrice: customizingItem.price,
-          isVeg: customizingItem.isVeg,
-          prepTimeMinutes: customizingItem.prepTimeMinutes,
-          quantity: payload.quantity,
-          selectedCustomizations: payload.selectedCustomizations,
-          specialInstructions: payload.specialInstructions,
-        },
-      ]);
-    }
+    const next = upsertCustomizedCartItem(
+      cart,
+      customizingItem,
+      payload,
+      editingCartItem?.cartItemId ?? null
+    );
+    updateCart(next);
     setCustomizingItem(null);
     setEditingCartItem(null);
   };
@@ -414,54 +366,54 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
     finalizeOrder('Pay at Restaurant', 'Pending');
   };
 
-  // A. COMPACT MOBILE-FIRST QR LANDING PAGE
+  // COMPACT, BALANCED MOBILE-FIRST QR LANDING PAGE
   if (!enteredMenu) {
     return (
-      <div className="min-h-screen bg-[#F7F9FC] flex flex-col items-center justify-center p-4">
-        <main className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
-          {/* Compact Brand Banner */}
-          <div className="bg-[#172B4D] text-white px-5 py-5 text-center">
-            <div className="flex justify-center">
-              <RestaurantBrandAvatar
-                restaurant={restaurant}
-                size="xl"
-                className="border-2 border-white/25"
-              />
+      <div className="min-h-[100svh] w-full box-border bg-[#F7F9FC] flex flex-col items-center px-[clamp(12px,4vw,24px)] pt-[max(clamp(16px,4vw,28px),env(safe-area-inset-top))] pb-[max(clamp(16px,4vw,28px),env(safe-area-inset-bottom))]">
+        <main className="my-auto w-full max-w-[388px] bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+          {/* Compact Navy Restaurant Header */}
+          <div className="bg-[#172B4D] text-white px-4 py-3.5 flex items-center gap-3">
+            <RestaurantBrandAvatar
+              restaurant={restaurant}
+              size="md"
+              className="border-2 border-white/25 shrink-0"
+            />
+            <div className="min-w-0 text-left">
+              <h1 className="font-display text-[17px] sm:text-lg font-bold leading-tight truncate">
+                {restaurant.name}
+              </h1>
+              <p className="text-xs text-emerald-300 mt-0.5 truncate">
+                {branch?.name ?? restaurant.city}
+              </p>
             </div>
-            <h1 className="font-display text-xl font-bold mt-3 leading-tight">
-              {restaurant.name}
-            </h1>
-            <p className="text-xs text-emerald-300 mt-1">
-              {branch?.name ?? restaurant.city}
-            </p>
           </div>
 
-          {/* Compact Table Verification & Prominent CTA */}
-          <div className="p-5 space-y-4 text-center">
-            <div className="py-2.5 px-4 rounded-xl bg-emerald-50/70 border border-emerald-200/80 flex items-center justify-between">
-              <div className="text-left">
-                <p className="text-[11px] font-medium text-slate-600">Verified Dining Table</p>
-                <p className="text-xs text-slate-500">{table.section}</p>
+          {/* Balanced Table Verification & Primary View Menu CTA */}
+          <div className="p-4 space-y-3">
+            <div className="py-2.5 px-3.5 rounded-xl bg-emerald-50/75 border border-emerald-200/80 flex items-center justify-between gap-2">
+              <div className="text-left min-w-0">
+                <p className="text-[11px] font-semibold text-slate-600">Verified Dining Table</p>
+                <p className="text-xs text-slate-500 truncate">{table.section}</p>
               </div>
-              <p className="font-mono text-xl font-bold text-[#087F5B]">
+              <p className="font-mono text-lg sm:text-xl font-bold text-[#087F5B] whitespace-nowrap shrink-0">
                 Table {table.tableNumber}
               </p>
             </div>
 
-            <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">
-              {restaurant.settings.welcomeMessage}
+            <p className="text-xs text-slate-600 text-center leading-snug text-balance">
+              Browse the live menu and order directly from your table.
             </p>
 
             <button
               type="button"
               onClick={() => setEnteredMenu(true)}
-              className="w-full min-h-[48px] px-5 text-sm font-bold text-white bg-[#087F5B] hover:bg-[#06674A] rounded-xl transition-colors cursor-pointer"
+              className="w-full min-h-[46px] px-5 text-sm font-bold text-white bg-[#087F5B] hover:bg-[#06674A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#087F5B] focus-visible:ring-offset-2 rounded-xl transition-colors cursor-pointer"
             >
               View Menu
             </button>
 
-            <p className="text-[11px] text-slate-500">
-              No registration or app download required · Instant kitchen sync
+            <p className="text-[11px] text-slate-500 text-center">
+              No login required · Instant kitchen sync
             </p>
           </div>
 
@@ -479,16 +431,16 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
   return (
     <div
       className={`min-h-screen bg-[#F7F9FC] flex flex-col ${
-        showStickyCartBar ? 'pb-36' : 'pb-20'
+        showStickyCartBar ? 'pb-32' : 'pb-20'
       }`}
     >
       {/* Compact Sticky Top Bar with Uploaded Logo */}
-      <header className="sticky top-0 z-30 h-14 bg-white/95 backdrop-blur-md border-b border-slate-200 px-3.5 sm:px-4">
-        <div className="max-w-5xl mx-auto h-full flex items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2.5 min-w-0">
+      <header className="sticky top-0 z-30 h-[52px] bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 sm:px-4">
+        <div className="max-w-5xl mx-auto h-full flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <RestaurantBrandAvatar restaurant={restaurant} size="sm" />
             <div className="min-w-0">
-              <p className="font-display text-sm font-bold text-[#172B4D] truncate leading-tight">
+              <p className="font-display text-[13px] sm:text-sm font-bold text-[#172B4D] truncate leading-tight">
                 {restaurant.name}
               </p>
               <p className="text-[11px] text-slate-500 truncate leading-tight">
@@ -497,14 +449,14 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
-            <span className="font-mono text-xs font-bold text-[#087F5B] bg-emerald-50 border border-emerald-200/80 px-2 py-1 rounded-md">
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="font-mono text-[11px] sm:text-xs font-bold text-[#087F5B] bg-emerald-50 border border-emerald-200/80 px-2 py-1 rounded-md whitespace-nowrap">
               Table {table.tableNumber}
             </span>
             <button
               type="button"
               onClick={() => setActiveTab('cart')}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#087F5B] hover:bg-[#06674A] rounded-lg cursor-pointer"
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#087F5B] hover:bg-[#06674A] rounded-lg cursor-pointer whitespace-nowrap"
             >
               <ShoppingBag className="w-3.5 h-3.5" />
               Cart ({pricing.itemCount})
@@ -514,7 +466,7 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-5xl w-full mx-auto px-3.5 sm:px-4 py-4 space-y-4">
+      <main className="flex-1 max-w-5xl w-full mx-auto px-3 sm:px-4 py-3.5 sm:py-4 space-y-3.5">
         {/* MENU / SEARCH / CATEGORIES VIEW */}
         {(activeTab === 'menu' || activeTab === 'search' || activeTab === 'categories') && (
           <>
@@ -631,11 +583,12 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
                     </button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3">
                     {filteredMenuItems.map((item) => {
                       const inCartQty = cart
                         .filter((ci) => ci.menuItemId === item.id)
                         .reduce((s, ci) => s + ci.quantity, 0);
+                      const isCustomizable = hasConfiguredCustomizations(item);
 
                       return (
                         <article
@@ -644,101 +597,116 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
                             !item.available ? 'opacity-65' : ''
                           }`}
                         >
-                          {/* LEFT: Food Name, Description, Price, Options & Swiggy-Style Add/Stepper */}
-                          <div className="flex-1 min-w-0 flex flex-col justify-between">
+                          {/* LEFT: Veg Indicator, Dish Name, Price, Concise Description & Options */}
+                          <div className="flex-1 min-w-0 flex flex-col justify-between self-stretch">
                             <div>
-                              <div className="flex items-center gap-1.5">
-                                <VegIndicator isVeg={item.isVeg} />
-                                <h2 className="font-display font-bold text-[#172B4D] text-sm sm:text-[15px] leading-snug truncate">
-                                  {item.name}
-                                </h2>
-                              </div>
-                              <p className="mt-1 text-xs text-slate-600 leading-snug line-clamp-2">
-                                {item.description}
-                              </p>
-                              <p className="text-[11px] text-slate-400 mt-1">
-                                {item.category} · {item.prepTimeMinutes} min
-                                {!item.available ? ' · Unavailable' : ''}
-                              </p>
-                            </div>
-
-                            <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
-                              <span className="font-mono font-bold text-[#172B4D] text-sm sm:text-[15px] tabular-nums">
-                                {formatCurrency(item.price, cur)}
-                              </span>
-
-                              {item.available ? (
+                              <button
+                                type="button"
+                                onClick={() => openCustomizationSheet(item, null)}
+                                disabled={!item.available}
+                                className="w-full text-left cursor-pointer disabled:cursor-default group"
+                              >
                                 <div className="flex items-center gap-1.5">
-                                  {item.customizations.length > 0 && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setEditingCartItem(null);
-                                        setCustomizingItem(item);
-                                      }}
-                                      aria-label={`Customize ${item.name}`}
-                                      className="min-h-[34px] px-2 text-[11px] font-semibold text-[#172B4D] bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                                    >
-                                      <SlidersHorizontal className="w-3 h-3" />
-                                      Options
-                                    </button>
-                                  )}
-
-                                  {inCartQty === 0 ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleQuickAdd(item)}
-                                      aria-label={`Add ${item.name} to cart`}
-                                      className="min-h-[34px] min-w-[78px] px-3 text-xs font-bold text-white bg-[#087F5B] hover:bg-[#06674A] rounded-lg cursor-pointer whitespace-nowrap transition-colors"
-                                    >
-                                      + Add
-                                    </button>
-                                  ) : (
-                                    <div
-                                      className="inline-flex items-center bg-[#087F5B] text-white rounded-lg overflow-hidden min-h-[34px]"
-                                      role="group"
-                                      aria-label={`Quantity controls for ${item.name}`}
-                                    >
-                                      <button
-                                        type="button"
-                                        onClick={() => handleMenuCardDecrement(item)}
-                                        aria-label={`Decrease ${item.name} quantity`}
-                                        className="min-h-[34px] w-8 flex items-center justify-center hover:bg-[#06674A] cursor-pointer"
-                                      >
-                                        <Minus className="w-3.5 h-3.5" />
-                                      </button>
-                                      <span
-                                        className="min-w-[24px] text-center font-mono text-xs font-bold tabular-nums"
-                                        aria-live="polite"
-                                      >
-                                        {inCartQty}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleMenuCardIncrement(item)}
-                                        aria-label={`Increase ${item.name} quantity`}
-                                        className="min-h-[34px] w-8 flex items-center justify-center hover:bg-[#06674A] cursor-pointer"
-                                      >
-                                        <Plus className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  )}
+                                  <VegIndicator isVeg={item.isVeg} />
+                                  <h2 className="font-display font-bold text-[#172B4D] group-hover:text-[#087F5B] text-[14px] sm:text-[15px] leading-snug truncate transition-colors">
+                                    {item.name}
+                                  </h2>
                                 </div>
-                              ) : (
-                                <span className="text-xs font-semibold text-slate-400">
-                                  Sold Out
-                                </span>
-                              )}
+
+                                <div className="mt-1 flex items-center gap-1.5">
+                                  <span className="font-mono font-bold text-[#172B4D] text-[14px] sm:text-[15px] tabular-nums">
+                                    {formatCurrency(item.price, cur)}
+                                  </span>
+                                  <span className="text-[11px] text-slate-400">
+                                    · {item.prepTimeMinutes} min
+                                    {!item.available ? ' · Sold out' : ''}
+                                  </span>
+                                </div>
+
+                                <p className="mt-1 text-xs text-slate-600 leading-[1.35] line-clamp-2">
+                                  {item.description}
+                                </p>
+                              </button>
                             </div>
+
+                            {item.available && isCustomizable && (
+                              <div className="mt-2 flex items-center">
+                                <button
+                                  type="button"
+                                  onClick={() => openCustomizationSheet(item, null)}
+                                  aria-label={`Customize ${item.name}`}
+                                  className="min-h-[32px] px-2.5 text-[11px] font-semibold text-[#172B4D] bg-slate-100 hover:bg-slate-200/80 rounded-lg inline-flex items-center gap-1 cursor-pointer whitespace-nowrap transition-colors"
+                                >
+                                  <SlidersHorizontal className="w-3 h-3 text-[#087F5B]" />
+                                  Options
+                                </button>
+                              </div>
+                            )}
                           </div>
 
-                          {/* RIGHT: Compact Square Food Image */}
-                          <div className="w-24 h-24 sm:w-26 sm:h-26 shrink-0 rounded-xl overflow-hidden bg-slate-100 border border-slate-100">
-                            <FoodImage
-                              src={item.imageUrl}
-                              alt={item.name}
-                              className="w-full h-full"
-                            />
+                          {/* RIGHT: Compact Food Image + Anchored Swiggy-Style Add / Qty Stepper */}
+                          <div className="w-[96px] sm:w-[106px] shrink-0 flex flex-col items-center">
+                            <button
+                              type="button"
+                              onClick={() => openCustomizationSheet(item, null)}
+                              disabled={!item.available}
+                              aria-label={`View details for ${item.name}`}
+                              className="w-[96px] h-[84px] sm:w-[106px] sm:h-[92px] rounded-xl overflow-hidden bg-slate-100 border border-slate-100 block cursor-pointer disabled:cursor-default"
+                            >
+                              <FoodImage
+                                src={item.imageUrl}
+                                alt={item.name}
+                                className="w-full h-full"
+                              />
+                            </button>
+
+                            {item.available ? (
+                              <div className="-mt-3.5 relative z-10 w-[86px] sm:w-[92px]">
+                                {inCartQty === 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePrimaryAddClick(item)}
+                                    aria-label={`Add ${item.name} to cart`}
+                                    className="w-full min-h-[34px] px-2.5 text-xs font-bold text-white bg-[#087F5B] hover:bg-[#06674A] active:scale-[0.98] rounded-lg ring-2 ring-white shadow-sm cursor-pointer whitespace-nowrap transition-all"
+                                  >
+                                    + Add
+                                  </button>
+                                ) : (
+                                  <div
+                                    className="w-full inline-flex items-center justify-between bg-[#087F5B] text-white rounded-lg ring-2 ring-white shadow-sm overflow-hidden min-h-[34px]"
+                                    role="group"
+                                    aria-label={`Quantity controls for ${item.name}`}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMenuCardDecrement(item)}
+                                      aria-label={`Decrease ${item.name} quantity`}
+                                      className="min-h-[34px] w-7 flex items-center justify-center hover:bg-[#06674A] cursor-pointer"
+                                    >
+                                      <Minus className="w-3.5 h-3.5" />
+                                    </button>
+                                    <span
+                                      className="min-w-[20px] text-center font-mono text-xs font-bold tabular-nums"
+                                      aria-live="polite"
+                                    >
+                                      {inCartQty}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMenuCardIncrement(item)}
+                                      aria-label={`Increase ${item.name} quantity`}
+                                      className="min-h-[34px] w-7 flex items-center justify-center hover:bg-[#06674A] cursor-pointer"
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="mt-1.5 text-[11px] font-semibold text-slate-400">
+                                Sold Out
+                              </span>
+                            )}
                           </div>
                         </article>
                       );
@@ -829,23 +797,22 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
 
                           <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
                             <div className="flex items-center gap-3 text-xs">
-                              {fullMenuItem && fullMenuItem.customizations.length > 0 && (
+                              {fullMenuItem && (
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setEditingCartItem(ci);
-                                    setCustomizingItem(fullMenuItem);
-                                  }}
-                                  className="font-semibold text-[#087F5B] cursor-pointer"
+                                  onClick={() => openCustomizationSheet(fullMenuItem, ci)}
+                                  className="font-semibold text-[#087F5B] hover:text-[#06674A] cursor-pointer whitespace-nowrap"
                                 >
-                                  Edit options
+                                  {hasConfiguredCustomizations(fullMenuItem)
+                                    ? 'Edit options'
+                                    : 'Edit note'}
                                 </button>
                               )}
                               <button
                                 type="button"
                                 onClick={() => handleRemoveCartItem(ci.cartItemId)}
                                 aria-label={`Remove ${ci.name}`}
-                                className="text-red-600 inline-flex items-center gap-0.5 cursor-pointer"
+                                className="text-red-600 inline-flex items-center gap-0.5 cursor-pointer whitespace-nowrap"
                               >
                                 <Trash2 className="w-3 h-3" />
                                 Remove
@@ -1281,7 +1248,7 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
 
       {/* C. STICKY BOTTOM CART SUMMARY BAR (SWIGGY-STYLE) */}
       {showStickyCartBar && (
-        <div className="fixed bottom-16 left-0 right-0 z-35 px-3 pb-2 pointer-events-none">
+        <div className="fixed bottom-[56px] left-0 right-0 z-35 px-3 pb-2 pointer-events-none">
           <div className="max-w-5xl mx-auto pointer-events-auto">
             <button
               type="button"
@@ -1289,19 +1256,19 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
               aria-label={`View Cart, ${pricing.itemCount} ${
                 pricing.itemCount === 1 ? 'Item' : 'Items'
               }, ${formatCurrency(pricing.totalAmount, cur)}`}
-              className="w-full min-h-[48px] px-4 py-2.5 bg-[#087F5B] hover:bg-[#06674A] text-white rounded-xl shadow-lg flex items-center justify-between gap-3 cursor-pointer transition-colors"
+              className="w-full min-h-[46px] px-3.5 sm:px-4 py-2 bg-[#087F5B] hover:bg-[#06674A] text-white rounded-xl shadow-lg flex items-center justify-between gap-2 cursor-pointer transition-colors"
             >
-              <span className="flex items-center gap-2 text-xs sm:text-sm font-bold">
+              <span className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-bold min-w-0">
                 <ShoppingBag className="w-4 h-4 shrink-0" />
-                <span>
+                <span className="whitespace-nowrap">
                   {pricing.itemCount} {pricing.itemCount === 1 ? 'Item' : 'Items'}
                 </span>
                 <span className="opacity-60">|</span>
-                <span className="font-mono tabular-nums">
+                <span className="font-mono tabular-nums whitespace-nowrap">
                   {formatCurrency(pricing.totalAmount, cur)}
                 </span>
               </span>
-              <span className="text-xs sm:text-sm font-bold tracking-tight whitespace-nowrap">
+              <span className="text-xs sm:text-sm font-bold tracking-tight whitespace-nowrap shrink-0">
                 View Cart →
               </span>
             </button>
@@ -1312,7 +1279,7 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
       {/* Customer Mobile-First Bottom Navigation (NO Admin / Owner links) */}
       <nav
         aria-label="Customer Navigation"
-        className="fixed bottom-0 left-0 right-0 z-40 h-16 bg-white/95 backdrop-blur-md border-t border-slate-200"
+        className="fixed bottom-0 left-0 right-0 z-40 h-14 bg-white/95 backdrop-blur-md border-t border-slate-200"
       >
         <div className="max-w-5xl mx-auto h-full grid grid-cols-5">
           {[
@@ -1326,7 +1293,7 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
             },
             {
               id: 'orders' as CustomerTab,
-              label: mySessionOrders.length > 0 ? `Orders (${mySessionOrders.length})` : 'My Orders',
+              label: mySessionOrders.length > 0 ? `Orders (${mySessionOrders.length})` : 'Orders',
               icon: ClipboardList,
             },
           ].map((tab) => {
@@ -1342,12 +1309,12 @@ export const CustomerOrderApp: React.FC<CustomerOrderAppProps> = ({
                     window.setTimeout(() => searchInputRef.current?.focus(), 60);
                   }
                 }}
-                className={`flex flex-col items-center justify-center gap-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+                className={`flex flex-col items-center justify-center gap-0.5 text-[10px] sm:text-[11px] font-semibold transition-colors cursor-pointer ${
                   active ? 'text-[#087F5B]' : 'text-slate-500 hover:text-[#172B4D]'
                 }`}
               >
-                <Icon className="w-5 h-5" />
-                <span className="truncate max-w-full px-1">{tab.label}</span>
+                <Icon className="w-[18px] h-[18px]" />
+                <span className="truncate max-w-full px-0.5">{tab.label}</span>
               </button>
             );
           })}

@@ -16,6 +16,7 @@ import {
   getCustomerTrackingStepIndex,
   getEffectiveSubscriptionAmount,
   getNextOrderStatus,
+  hasConfiguredCustomizations,
   isRestaurantOrderingAvailable,
   isValidIndianMobile,
   parseTableQrRoute,
@@ -23,11 +24,20 @@ import {
   scopeOrdersByRestaurant,
   SUBSCRIPTION_PLANS,
   updateCatalogPlanPriceWithoutMutatingTenants,
+  upsertCustomizedCartItem,
   validateCustomerCheckout,
+  validateCustomizationSelections,
   validateLoginForm,
   validateTableForm,
 } from './serveqrLogic';
-import type { CartItem, DiningTable, Order, Restaurant } from './types';
+import type {
+  CartItem,
+  CustomizationGroup,
+  DiningTable,
+  MenuItem,
+  Order,
+  Restaurant,
+} from './types';
 
 test('QR route building and parsing round-trips restaurant slug, table, branch, and version', () => {
   const path = buildTableQrPath('abc-restaurant', 'T01', 'BR-1001-1', 2);
@@ -343,3 +353,103 @@ test('form validators and dashboard metrics compute active counts, revenue, and 
   assert.equal(restMetrics.totalTables, 2);
   assert.equal(restMetrics.activeQrTables, 2);
 });
+
+test('customization validation enforces mandatory groups and cart upsert merges identical variants cleanly', () => {
+  const groups: CustomizationGroup[] = [
+    {
+      id: 'grp-portion',
+      name: 'Portion Size',
+      type: 'single',
+      required: true,
+      choices: [
+        { id: 'c-reg', label: 'Regular', priceDelta: 0 },
+        { id: 'c-full', label: 'Full', priceDelta: 120 },
+      ],
+    },
+    {
+      id: 'grp-addons',
+      name: 'Add-ons',
+      type: 'multiple',
+      required: false,
+      choices: [
+        { id: 'c-raita', label: 'Extra Raita', priceDelta: 25 },
+        { id: 'c-egg', label: 'Boiled Egg', priceDelta: 20 },
+      ],
+    },
+  ];
+
+  assert.equal(hasConfiguredCustomizations({ customizations: groups }), true);
+  assert.equal(hasConfiguredCustomizations({ customizations: [] }), false);
+
+  const missing = validateCustomizationSelections(groups, []);
+  assert.equal(missing.valid, false);
+  assert.deepEqual(missing.missingGroupIds, ['grp-portion']);
+  assert.deepEqual(missing.missingGroupNames, ['Portion Size']);
+
+  const selectedFullWithAddons = [
+    {
+      groupId: 'grp-portion',
+      groupName: 'Portion Size',
+      choiceId: 'c-full',
+      choiceLabel: 'Full',
+      priceDelta: 120,
+    },
+    {
+      groupId: 'grp-addons',
+      groupName: 'Add-ons',
+      choiceId: 'c-raita',
+      choiceLabel: 'Extra Raita',
+      priceDelta: 25,
+    },
+  ];
+  assert.equal(validateCustomizationSelections(groups, selectedFullWithAddons).valid, true);
+  assert.equal(calculateCartItemUnitPrice(180, selectedFullWithAddons), 325);
+
+  const dish: MenuItem = {
+    id: 'MENU-101',
+    restaurantId: 'RST-1001',
+    name: 'Chicken Biryani',
+    description: 'Hyderabadi dum biryani',
+    imageUrl: '',
+    price: 180,
+    category: 'Biryani & Rice',
+    isVeg: false,
+    available: true,
+    prepTimeMinutes: 18,
+    customizations: groups,
+  };
+
+  let cart: CartItem[] = [];
+  cart = upsertCustomizedCartItem(cart, dish, {
+    selectedCustomizations: selectedFullWithAddons,
+    specialInstructions: 'Less oil',
+    quantity: 1,
+  });
+  assert.equal(cart.length, 1);
+  assert.equal(cart[0].quantity, 1);
+
+  // Adding the exact same customization + note merges quantity
+  cart = upsertCustomizedCartItem(cart, dish, {
+    selectedCustomizations: [...selectedFullWithAddons].reverse(),
+    specialInstructions: '  less oil ',
+    quantity: 2,
+  });
+  assert.equal(cart.length, 1);
+  assert.equal(cart[0].quantity, 3);
+
+  // Editing existing cart line updates in place
+  cart = upsertCustomizedCartItem(
+    cart,
+    dish,
+    {
+      selectedCustomizations: [selectedFullWithAddons[0]],
+      specialInstructions: '',
+      quantity: 2,
+    },
+    cart[0].cartItemId
+  );
+  assert.equal(cart.length, 1);
+  assert.equal(cart[0].quantity, 2);
+  assert.equal(cart[0].selectedCustomizations.length, 1);
+});
+

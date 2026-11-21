@@ -3,6 +3,7 @@ import type {
   BillingCycle,
   CartItem,
   CustomerVerificationSettings,
+  CustomizationGroup,
   DiningTable,
   MenuItem,
   Order,
@@ -322,6 +323,108 @@ export function calculateCartItemUnitPrice(
   selected: SelectedCustomization[]
 ): number {
   return Math.max(0, roundCurrency(basePrice + calculateCustomizationDelta(selected)));
+}
+
+export function hasConfiguredCustomizations(item: Pick<MenuItem, 'customizations'>): boolean {
+  return item.customizations.some((group) => group.choices.length > 0);
+}
+
+export interface CustomizationValidationResult {
+  valid: boolean;
+  missingGroupIds: string[];
+  missingGroupNames: string[];
+}
+
+export function validateCustomizationSelections(
+  groups: CustomizationGroup[],
+  selected: SelectedCustomization[]
+): CustomizationValidationResult {
+  const missingGroupIds: string[] = [];
+  const missingGroupNames: string[] = [];
+
+  for (const group of groups) {
+    if (!group.required || group.choices.length === 0) continue;
+    const hasSelection = selected.some((s) => s.groupId === group.id);
+    if (!hasSelection) {
+      missingGroupIds.push(group.id);
+      missingGroupNames.push(group.name);
+    }
+  }
+
+  return {
+    valid: missingGroupIds.length === 0,
+    missingGroupIds,
+    missingGroupNames,
+  };
+}
+
+function getCustomizationSignature(
+  selected: SelectedCustomization[],
+  specialInstructions: string
+): string {
+  const sorted = [...selected]
+    .map((s) => `${s.groupId}:${s.choiceId}:${s.priceDelta}`)
+    .sort()
+    .join('|');
+  return `${sorted}::${specialInstructions.trim().toLowerCase()}`;
+}
+
+export function upsertCustomizedCartItem(
+  cart: CartItem[],
+  item: MenuItem,
+  payload: {
+    selectedCustomizations: SelectedCustomization[];
+    specialInstructions: string;
+    quantity: number;
+  },
+  editingCartItemId?: string | null
+): CartItem[] {
+  const cleanQty = Math.max(1, Math.floor(payload.quantity));
+  const cleanNotes = payload.specialInstructions.trim();
+
+  if (editingCartItemId) {
+    return cart.map((ci) =>
+      ci.cartItemId === editingCartItemId
+        ? {
+            ...ci,
+            selectedCustomizations: payload.selectedCustomizations,
+            specialInstructions: cleanNotes,
+            quantity: cleanQty,
+          }
+        : ci
+    );
+  }
+
+  const targetSig = getCustomizationSignature(payload.selectedCustomizations, cleanNotes);
+  const existing = cart.find(
+    (ci) =>
+      ci.menuItemId === item.id &&
+      getCustomizationSignature(ci.selectedCustomizations, ci.specialInstructions) === targetSig
+  );
+
+  if (existing) {
+    return cart.map((ci) =>
+      ci.cartItemId === existing.cartItemId
+        ? { ...ci, quantity: ci.quantity + cleanQty }
+        : ci
+    );
+  }
+
+  return [
+    ...cart,
+    {
+      cartItemId: `ci-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      menuItemId: item.id,
+      name: item.name,
+      imageUrl: item.imageUrl,
+      basePrice: item.price,
+      isVeg: item.isVeg,
+      prepTimeMinutes: item.prepTimeMinutes,
+      quantity: cleanQty,
+      selectedCustomizations: payload.selectedCustomizations,
+      specialInstructions: cleanNotes,
+    },
+  ];
 }
 
 export function roundCurrency(value: number): number {
